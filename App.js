@@ -1,10 +1,18 @@
-import React, { useState, useRef } from 'react';
-import { View, StyleSheet, SafeAreaView, Text, TouchableOpacity, Animated } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, StyleSheet, SafeAreaView, Text, TouchableOpacity, Animated, Button } from 'react-native';
 
 const BOARD_SIZE = 6;
 const EMOJIS = ['🔴', '🟢', '🔵', '🟡', '🟣', '🟠'];
 const BONUS = '💥';
 const ANIMATION_DURATION = 350;
+
+const LEVELS = [
+  { time: 60, target: 600 },
+  { time: 50, target: 900 },
+  { time: 40, target: 1300 },
+  { time: 35, target: 1800 },
+  { time: 30, target: 2500 },
+];
 
 function getRandomEmoji() {
   return EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
@@ -186,18 +194,43 @@ export default function App() {
   const [bonuses, setBonuses] = useState([]); // [{type, row, col}]
   const [isAnimating, setIsAnimating] = useState(false);
   const [score, setScore] = useState(0);
+  const [level, setLevel] = useState(0);
+  const [timer, setTimer] = useState(LEVELS[0].time);
+  const [targetScore, setTargetScore] = useState(LEVELS[0].target);
+  const [gameOver, setGameOver] = useState(false);
+  const [levelCompleted, setLevelCompleted] = useState(false);
   const opacityAnim = useRef(
     Array.from({ length: BOARD_SIZE }, () =>
       Array.from({ length: BOARD_SIZE }, () => new Animated.Value(1))
     )
   ).current;
+  const overlayAnim = useRef(new Animated.Value(0)).current;
+
+  // Таймер
+  useEffect(() => {
+    if (gameOver || levelCompleted) return;
+    if (timer <= 0) {
+      setGameOver(true);
+      return;
+    }
+    const interval = setInterval(() => {
+      setTimer(t => t - 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timer, gameOver, levelCompleted]);
+
+  // Перевірка на проходження рівня
+  useEffect(() => {
+    if (!levelCompleted && score >= targetScore) {
+      setLevelCompleted(true);
+    }
+  }, [score, targetScore, levelCompleted]);
 
   // Очищення стартових матчів
-  React.useEffect(() => {
+  useEffect(() => {
     let b = board;
     let { matches: m, bonuses: bs, matchGroups: mg } = findMatches(b);
     while (hasAnyMatches(m)) {
-      // Підрахунок очок для старту (не обов'язково, але для коректності)
       let points = 0;
       for (const group of mg) {
         if (group.count === 3) points += 10 * 3;
@@ -215,10 +248,9 @@ export default function App() {
   }, []);
 
   // Анімація зникнення
-  React.useEffect(() => {
+  useEffect(() => {
     if (!matches) return;
     setIsAnimating(true);
-    // Запускаємо анімацію для всіх matched
     const animations = [];
     for (let row = 0; row < BOARD_SIZE; row++) {
       for (let col = 0; col < BOARD_SIZE; col++) {
@@ -234,10 +266,8 @@ export default function App() {
       }
     }
     Animated.parallel(animations).start(() => {
-      // Підрахунок очок за матчі
       let points = 0;
       if (matches && matches.length) {
-        // Пошук груп для підрахунку очок
         let { matchGroups } = findMatches(board);
         for (const group of matchGroups) {
           if (group.count === 3) points += 10 * 3;
@@ -245,23 +275,18 @@ export default function App() {
         }
       }
       setScore(s => s + points);
-      // Після анімації — видалити та впустити нові
       let newBoard = removeMatchesAndDrop(board, matches, bonuses);
-      // Скинути opacity для нових
       for (let row = 0; row < BOARD_SIZE; row++) {
         for (let col = 0; col < BOARD_SIZE; col++) {
           opacityAnim[row][col].setValue(1);
         }
       }
-      // Якщо є бонуси — активувати їх
       if (bonuses.length > 0) {
-        // Активуємо всі бонуси по черзі
         let tempBoard = newBoard;
         let bonusMatches = null;
         let bonusIndex = 0;
         function activateNextBonus() {
           if (bonusIndex >= bonuses.length) {
-            // Після всіх бонусів — перевірити чи є ще матчі
             const res = findMatches(tempBoard);
             if (hasAnyMatches(res.matches)) {
               setBoard(tempBoard);
@@ -277,7 +302,6 @@ export default function App() {
           }
           const bonus = bonuses[bonusIndex];
           bonusMatches = getBonusMatches(tempBoard, bonus);
-          // Підрахунок очок за активацію бонусу
           let bonusPoints = 0;
           for (let row = 0; row < BOARD_SIZE; row++) {
             for (let col = 0; col < BOARD_SIZE; col++) {
@@ -285,7 +309,6 @@ export default function App() {
             }
           }
           setScore(s => s + bonusPoints);
-          // Анімація для всього ряду/стовпця
           const bonusAnims = [];
           for (let row = 0; row < BOARD_SIZE; row++) {
             for (let col = 0; col < BOARD_SIZE; col++) {
@@ -302,7 +325,6 @@ export default function App() {
           }
           Animated.parallel(bonusAnims).start(() => {
             tempBoard = activateBonus(tempBoard, bonus);
-            // Скинути opacity для нових
             for (let row = 0; row < BOARD_SIZE; row++) {
               for (let col = 0; col < BOARD_SIZE; col++) {
                 if (bonusMatches[row][col]) {
@@ -317,7 +339,6 @@ export default function App() {
         }
         activateNextBonus();
       } else {
-        // Перевірити чи є ще матчі (chain reaction)
         const res = findMatches(newBoard);
         if (hasAnyMatches(res.matches)) {
           setBoard(newBoard);
@@ -334,8 +355,48 @@ export default function App() {
     // eslint-disable-next-line
   }, [matches]);
 
+  // Анімація появи/зникнення оверлею рівня
+  useEffect(() => {
+    if (levelCompleted && !gameOver) {
+      Animated.timing(overlayAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(overlayAnim, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [levelCompleted, gameOver]);
+
+  // Перехід на наступний рівень з додатковим часом
+  useEffect(() => {
+    if (levelCompleted) {
+      setTimeout(() => {
+        const nextLevel = level + 1;
+        if (nextLevel < LEVELS.length) {
+          setLevel(nextLevel);
+          setTimer(LEVELS[nextLevel].time + 5 * nextLevel);
+          setTargetScore(LEVELS[nextLevel].target);
+          setScore(0);
+          setBoard(generateBoard());
+          setSelected(null);
+          setMatches(null);
+          setBonuses([]);
+          setGameOver(false);
+          setLevelCompleted(false);
+        } else {
+          setGameOver(true);
+        }
+      }, 2000);
+    }
+  }, [levelCompleted]);
+
   const handleCellPress = (row, col) => {
-    if (isAnimating) return; // блокувати під час анімації
+    if (isAnimating || gameOver || levelCompleted) return;
     if (!selected) {
       setSelected([row, col]);
       return;
@@ -349,10 +410,8 @@ export default function App() {
       setSelected([row, col]);
       return;
     }
-    // Swap
     let newBoard = cloneBoard(board);
     [newBoard[selRow][selCol], newBoard[row][col]] = [newBoard[row][col], newBoard[selRow][selCol]];
-    // Check for matches
     let { matches: foundMatches, bonuses: foundBonuses, matchGroups: foundGroups } = findMatches(newBoard);
     if (hasAnyMatches(foundMatches)) {
       setBoard(newBoard);
@@ -364,10 +423,25 @@ export default function App() {
     setSelected(null);
   };
 
+  const handleRestart = () => {
+    setLevel(0);
+    setTimer(LEVELS[0].time);
+    setTargetScore(LEVELS[0].target);
+    setScore(0);
+    setBoard(generateBoard());
+    setSelected(null);
+    setMatches(null);
+    setBonuses([]);
+    setGameOver(false);
+    setLevelCompleted(false);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>3 в ряд</Text>
-      <Text style={styles.score}>Очки: {score}</Text>
+      <Text style={styles.level}>Рівень: {level + 1}</Text>
+      <Text style={styles.score}>Очки: {score} / {targetScore}</Text>
+      <Text style={styles.timer}>Час: {timer} сек</Text>
       <View style={styles.board}>
         {board.map((row, rowIndex) => (
           <View key={rowIndex} style={styles.row}>
@@ -379,7 +453,7 @@ export default function App() {
                   style={[styles.cell, isSelected && styles.selectedCell]}
                   activeOpacity={0.7}
                   onPress={() => handleCellPress(rowIndex, colIndex)}
-                  disabled={isAnimating}
+                  disabled={isAnimating || gameOver || levelCompleted}
                 >
                   <Animated.View style={{ opacity: opacityAnim[rowIndex][colIndex] }}>
                     <Text style={styles.emoji}>{cell}</Text>
@@ -391,6 +465,17 @@ export default function App() {
         ))}
       </View>
       <Text style={styles.info}>Тапни по двом сусіднім кружечкам для обміну. 4 в ряд = 💥 бонус!</Text>
+      {gameOver && (
+        <View style={styles.overlay}>
+          <Text style={styles.gameOverText}>{levelCompleted ? 'Рівень пройдено!' : 'Гру завершено!'}</Text>
+          <Button title="Почати спочатку" onPress={handleRestart} />
+        </View>
+      )}
+      {levelCompleted && !gameOver && (
+        <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}> 
+          <Text style={styles.gameOverText}>Рівень пройдено! Наступний стартує...</Text>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }
@@ -408,11 +493,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 8,
   },
+  level: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
   score: {
     color: '#fff',
     fontSize: 22,
     fontWeight: 'bold',
-    marginBottom: 16,
+    marginBottom: 4,
+  },
+  timer: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
   },
   board: {
     backgroundColor: '#333',
@@ -443,5 +540,22 @@ const styles = StyleSheet.create({
     color: '#aaa',
     marginTop: 24,
     fontSize: 16,
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gameOverText: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 24,
+    textAlign: 'center',
   },
 }); 
