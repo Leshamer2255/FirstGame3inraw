@@ -4,6 +4,8 @@ import { View, StyleSheet, SafeAreaView, Text, TouchableOpacity, Animated, Butto
 const BOARD_SIZE = 6;
 const EMOJIS = ['🔴', '🟢', '🔵', '🟡', '🟣', '🟠'];
 const BONUS = '💥';
+const SUPER_BONUS = '🌈';
+const CROSS_BONUS = '💣';
 const ANIMATION_DURATION = 350;
 
 const LEVELS = [
@@ -13,6 +15,8 @@ const LEVELS = [
   { time: 35, target: 1800 },
   { time: 30, target: 2500 },
 ];
+
+const INITIAL_LIVES = 3;
 
 function getRandomEmoji() {
   return EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
@@ -40,6 +44,7 @@ function findMatches(board) {
   const matches = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(false));
   const bonuses = [];
   const matchGroups = [];
+  const bonusTypes = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(null));
 
   // Horizontal
   for (let row = 0; row < BOARD_SIZE; row++) {
@@ -54,10 +59,16 @@ function findMatches(board) {
             matches[row][col - 1 - k] = true;
             group.push([row, col - 1 - k]);
           }
-          matchGroups.push({ type: 'row', count, cells: group });
-          if (count >= 4) {
+          matchGroups.push({ type: 'row', count, cells: group, value: board[row][col - 1] });
+          if (count === 4) {
             const bonusCol = col - 1 - Math.floor(Math.random() * count);
-            bonuses.push({ type: 'row', row, col: bonusCol });
+            bonuses.push({ type: 'row', row, col: bonusCol, bonusType: BONUS });
+            bonusTypes[row][bonusCol] = BONUS;
+          }
+          if (count >= 5) {
+            const bonusCol = col - 1 - Math.floor(Math.random() * count);
+            bonuses.push({ type: 'row', row, col: bonusCol, bonusType: SUPER_BONUS, color: board[row][col - 1] });
+            bonusTypes[row][bonusCol] = SUPER_BONUS;
           }
         }
         count = 1;
@@ -69,10 +80,16 @@ function findMatches(board) {
         matches[row][BOARD_SIZE - 1 - k] = true;
         group.push([row, BOARD_SIZE - 1 - k]);
       }
-      matchGroups.push({ type: 'row', count, cells: group });
-      if (count >= 4) {
+      matchGroups.push({ type: 'row', count, cells: group, value: board[row][BOARD_SIZE - 1] });
+      if (count === 4) {
         const bonusCol = BOARD_SIZE - 1 - Math.floor(Math.random() * count);
-        bonuses.push({ type: 'row', row, col: bonusCol });
+        bonuses.push({ type: 'row', row, col: bonusCol, bonusType: BONUS });
+        bonusTypes[row][bonusCol] = BONUS;
+      }
+      if (count >= 5) {
+        const bonusCol = BOARD_SIZE - 1 - Math.floor(Math.random() * count);
+        bonuses.push({ type: 'row', row, col: bonusCol, bonusType: SUPER_BONUS, color: board[row][BOARD_SIZE - 1] });
+        bonusTypes[row][bonusCol] = SUPER_BONUS;
       }
     }
   }
@@ -90,10 +107,16 @@ function findMatches(board) {
             matches[row - 1 - k][col] = true;
             group.push([row - 1 - k, col]);
           }
-          matchGroups.push({ type: 'col', count, cells: group });
-          if (count >= 4) {
+          matchGroups.push({ type: 'col', count, cells: group, value: board[row - 1][col] });
+          if (count === 4) {
             const bonusRow = row - 1 - Math.floor(Math.random() * count);
-            bonuses.push({ type: 'col', row: bonusRow, col });
+            bonuses.push({ type: 'col', row: bonusRow, col, bonusType: BONUS });
+            bonusTypes[bonusRow][col] = BONUS;
+          }
+          if (count >= 5) {
+            const bonusRow = row - 1 - Math.floor(Math.random() * count);
+            bonuses.push({ type: 'col', row: bonusRow, col, bonusType: SUPER_BONUS, color: board[row - 1][col] });
+            bonusTypes[bonusRow][col] = SUPER_BONUS;
           }
         }
         count = 1;
@@ -105,15 +128,42 @@ function findMatches(board) {
         matches[BOARD_SIZE - 1 - k][col] = true;
         group.push([BOARD_SIZE - 1 - k, col]);
       }
-      matchGroups.push({ type: 'col', count, cells: group });
-      if (count >= 4) {
+      matchGroups.push({ type: 'col', count, cells: group, value: board[BOARD_SIZE - 1][col] });
+      if (count === 4) {
         const bonusRow = BOARD_SIZE - 1 - Math.floor(Math.random() * count);
-        bonuses.push({ type: 'col', row: bonusRow, col });
+        bonuses.push({ type: 'col', row: bonusRow, col, bonusType: BONUS });
+        bonusTypes[bonusRow][col] = BONUS;
+      }
+      if (count >= 5) {
+        const bonusRow = BOARD_SIZE - 1 - Math.floor(Math.random() * count);
+        bonuses.push({ type: 'col', row: bonusRow, col, bonusType: SUPER_BONUS, color: board[BOARD_SIZE - 1][col] });
+        bonusTypes[bonusRow][col] = SUPER_BONUS;
       }
     }
   }
 
-  return { matches, bonuses, matchGroups };
+  // L/T-образний матч (хрестова бомба)
+  // Перебираємо всі клітинки, шукаємо перетин двох матчів
+  for (let row = 0; row < BOARD_SIZE; row++) {
+    for (let col = 0; col < BOARD_SIZE; col++) {
+      if (matches[row][col]) {
+        // Перевіряємо чи ця клітинка входить і в горизонтальний, і у вертикальний матч
+        let inRow = false, inCol = false;
+        for (const group of matchGroups) {
+          if (group.cells.some(([r, c]) => r === row && c === col)) {
+            if (group.type === 'row' && group.count >= 3) inRow = true;
+            if (group.type === 'col' && group.count >= 3) inCol = true;
+          }
+        }
+        if (inRow && inCol) {
+          bonuses.push({ type: 'cross', row, col, bonusType: CROSS_BONUS });
+          bonusTypes[row][col] = CROSS_BONUS;
+        }
+      }
+    }
+  }
+
+  return { matches, bonuses, matchGroups, bonusTypes };
 }
 
 function removeMatchesAndDrop(board, matches, bonusesToPlace = []) {
@@ -129,7 +179,7 @@ function removeMatchesAndDrop(board, matches, bonusesToPlace = []) {
   // Place bonuses
   for (const bonus of bonusesToPlace) {
     if (newBoard[bonus.row][bonus.col] === null) {
-      newBoard[bonus.row][bonus.col] = BONUS;
+      newBoard[bonus.row][bonus.col] = bonus.bonusType;
     }
   }
   // Drop
@@ -159,13 +209,33 @@ function hasAnyMatches(matches) {
   return false;
 }
 
-function activateBonus(board, bonus) {
+function activateBonus(board, bonus, colorForSuper) {
   let newBoard = cloneBoard(board);
-  if (bonus.type === 'row') {
+  if (bonus.bonusType === BONUS) {
+    // Стандартний бонус: зносить ряд або стовпець
+    if (bonus.type === 'row') {
+      for (let col = 0; col < BOARD_SIZE; col++) {
+        newBoard[bonus.row][col] = null;
+      }
+    } else if (bonus.type === 'col') {
+      for (let row = 0; row < BOARD_SIZE; row++) {
+        newBoard[row][bonus.col] = null;
+      }
+    }
+  } else if (bonus.bonusType === SUPER_BONUS) {
+    // Супербомба: зносить всі фішки такого ж кольору
+    for (let row = 0; row < BOARD_SIZE; row++) {
+      for (let col = 0; col < BOARD_SIZE; col++) {
+        if (board[row][col] === colorForSuper) {
+          newBoard[row][col] = null;
+        }
+      }
+    }
+  } else if (bonus.bonusType === CROSS_BONUS) {
+    // Хрестова бомба: зносить ряд і стовпець
     for (let col = 0; col < BOARD_SIZE; col++) {
       newBoard[bonus.row][col] = null;
     }
-  } else if (bonus.type === 'col') {
     for (let row = 0; row < BOARD_SIZE; row++) {
       newBoard[row][bonus.col] = null;
     }
@@ -173,13 +243,30 @@ function activateBonus(board, bonus) {
   return newBoard;
 }
 
-function getBonusMatches(board, bonus) {
+function getBonusMatches(board, bonus, colorForSuper) {
   const matches = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(false));
-  if (bonus.type === 'row') {
+  if (bonus.bonusType === BONUS) {
+    if (bonus.type === 'row') {
+      for (let col = 0; col < BOARD_SIZE; col++) {
+        matches[bonus.row][col] = true;
+      }
+    } else if (bonus.type === 'col') {
+      for (let row = 0; row < BOARD_SIZE; row++) {
+        matches[row][bonus.col] = true;
+      }
+    }
+  } else if (bonus.bonusType === SUPER_BONUS) {
+    for (let row = 0; row < BOARD_SIZE; row++) {
+      for (let col = 0; col < BOARD_SIZE; col++) {
+        if (board[row][col] === colorForSuper) {
+          matches[row][col] = true;
+        }
+      }
+    }
+  } else if (bonus.bonusType === CROSS_BONUS) {
     for (let col = 0; col < BOARD_SIZE; col++) {
       matches[bonus.row][col] = true;
     }
-  } else if (bonus.type === 'col') {
     for (let row = 0; row < BOARD_SIZE; row++) {
       matches[row][bonus.col] = true;
     }
@@ -199,6 +286,7 @@ export default function App() {
   const [targetScore, setTargetScore] = useState(LEVELS[0].target);
   const [gameOver, setGameOver] = useState(false);
   const [levelCompleted, setLevelCompleted] = useState(false);
+  const [lives, setLives] = useState(INITIAL_LIVES);
   const opacityAnim = useRef(
     Array.from({ length: BOARD_SIZE }, () =>
       Array.from({ length: BOARD_SIZE }, () => new Animated.Value(1))
@@ -210,14 +298,31 @@ export default function App() {
   useEffect(() => {
     if (gameOver || levelCompleted) return;
     if (timer <= 0) {
-      setGameOver(true);
+      // Якщо не досягнуто ціль — втрачаємо життя
+      if (score < targetScore) {
+        if (lives > 1) {
+          setLives(l => l - 1);
+          // Перезапускаємо рівень
+          setTimer(LEVELS[level].time + 5 * level);
+          setScore(0);
+          setBoard(generateBoard());
+          setSelected(null);
+          setMatches(null);
+          setBonuses([]);
+        } else {
+          setLives(0);
+          setGameOver(true);
+        }
+      } else {
+        setGameOver(true);
+      }
       return;
     }
     const interval = setInterval(() => {
       setTimer(t => t - 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, [timer, gameOver, levelCompleted]);
+  }, [timer, gameOver, levelCompleted, score, targetScore, lives, level]);
 
   // Перевірка на проходження рівня
   useEffect(() => {
@@ -301,7 +406,7 @@ export default function App() {
             return;
           }
           const bonus = bonuses[bonusIndex];
-          bonusMatches = getBonusMatches(tempBoard, bonus);
+          bonusMatches = getBonusMatches(tempBoard, bonus, bonus.color);
           let bonusPoints = 0;
           for (let row = 0; row < BOARD_SIZE; row++) {
             for (let col = 0; col < BOARD_SIZE; col++) {
@@ -324,7 +429,7 @@ export default function App() {
             }
           }
           Animated.parallel(bonusAnims).start(() => {
-            tempBoard = activateBonus(tempBoard, bonus);
+            tempBoard = activateBonus(tempBoard, bonus, bonus.color);
             for (let row = 0; row < BOARD_SIZE; row++) {
               for (let col = 0; col < BOARD_SIZE; col++) {
                 if (bonusMatches[row][col]) {
@@ -388,6 +493,7 @@ export default function App() {
           setBonuses([]);
           setGameOver(false);
           setLevelCompleted(false);
+          setLives(INITIAL_LIVES); // Відновлюємо життя
         } else {
           setGameOver(true);
         }
@@ -434,12 +540,14 @@ export default function App() {
     setBonuses([]);
     setGameOver(false);
     setLevelCompleted(false);
+    setLives(INITIAL_LIVES);
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>3 в ряд</Text>
       <Text style={styles.level}>Рівень: {level + 1}</Text>
+      <Text style={styles.lives}>Життя: {'❤️'.repeat(lives) + '🤍'.repeat(Math.max(0, INITIAL_LIVES - lives))}</Text>
       <Text style={styles.score}>Очки: {score} / {targetScore}</Text>
       <Text style={styles.timer}>Час: {timer} сек</Text>
       <View style={styles.board}>
@@ -456,7 +564,11 @@ export default function App() {
                   disabled={isAnimating || gameOver || levelCompleted}
                 >
                   <Animated.View style={{ opacity: opacityAnim[rowIndex][colIndex] }}>
-                    <Text style={styles.emoji}>{cell}</Text>
+                    {cell === BONUS || cell === SUPER_BONUS || cell === CROSS_BONUS ? (
+                      <Text style={styles.emoji}>{cell}</Text>
+                    ) : (
+                      <Text style={styles.emoji}>{cell}</Text>
+                    )}
                   </Animated.View>
                 </TouchableOpacity>
               );
@@ -496,6 +608,12 @@ const styles = StyleSheet.create({
   level: {
     color: '#fff',
     fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  lives: {
+    color: '#fff',
+    fontSize: 22,
     fontWeight: 'bold',
     marginBottom: 4,
   },
