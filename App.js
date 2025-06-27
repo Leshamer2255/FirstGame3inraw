@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, StyleSheet, SafeAreaView, Text, TouchableOpacity, Animated, Button } from 'react-native';
 
 const BOARD_SIZE = 6;
-const EMOJIS = ['🔴', '🟢', '🔵', '🟡', '🟣', '🟠'];
-const BONUS = '💥';
-const SUPER_BONUS = '🌈';
+const EMOJIS = ['₿', 'Ξ', '��', '🐕', '◎', '₳'];
+const BONUS = '🚀';
+const SUPER_BONUS = '💥';
 const CROSS_BONUS = '💣';
 const ANIMATION_DURATION = 350;
 
@@ -17,6 +17,15 @@ const LEVELS = [
 ];
 
 const INITIAL_LIVES = 3;
+
+// Додаю місії для кожного рівня
+const MISSIONS = [
+  { symbol: '₿', name: 'Bitcoin', count: 10 },
+  { symbol: 'Ξ', name: 'Ethereum', count: 12 },
+  { symbol: '🐕', name: 'Dogecoin', count: 15 },
+  { symbol: '◎', name: 'Solana', count: 14 },
+  { symbol: '₳', name: 'Cardano', count: 16 },
+];
 
 function getRandomEmoji() {
   return EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
@@ -274,6 +283,30 @@ function getBonusMatches(board, bonus, colorForSuper) {
   return matches;
 }
 
+function findPossibleMove(board) {
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      // Check swap with right neighbor
+      if (c < BOARD_SIZE - 1) {
+        const newBoard = cloneBoard(board);
+        [newBoard[r][c], newBoard[r][c + 1]] = [newBoard[r][c + 1], newBoard[r][c]];
+        if (hasAnyMatches(findMatches(newBoard).matches)) {
+          return [[r, c], [r, c + 1]];
+        }
+      }
+      // Check swap with bottom neighbor
+      if (r < BOARD_SIZE - 1) {
+        const newBoard = cloneBoard(board);
+        [newBoard[r][c], newBoard[r + 1][c]] = [newBoard[r + 1][c], newBoard[r][c]];
+        if (hasAnyMatches(findMatches(newBoard).matches)) {
+          return [[r, c], [r + 1, c]];
+        }
+      }
+    }
+  }
+  return null; // No possible moves
+}
+
 export default function App() {
   const [board, setBoard] = useState(generateBoard());
   const [selected, setSelected] = useState(null); // [row, col]
@@ -293,6 +326,11 @@ export default function App() {
     )
   ).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
+  const [missionProgress, setMissionProgress] = useState(0);
+  const [hint, setHint] = useState(null); // [[r1, c1], [r2, c2]]
+  const hintAnim = useRef(new Animated.Value(1)).current;
+  const hintTimer = useRef(null);
+  const hintAnimation = useRef(null);
 
   // Таймер
   useEffect(() => {
@@ -407,6 +445,15 @@ export default function App() {
           }
           const bonus = bonuses[bonusIndex];
           bonusMatches = getBonusMatches(tempBoard, bonus, bonus.color);
+          let collectedFromBonus = 0;
+          for (let row = 0; row < BOARD_SIZE; row++) {
+            for (let col = 0; col < BOARD_SIZE; col++) {
+              if (bonusMatches[row][col] && tempBoard[row][col] === MISSIONS[level % MISSIONS.length].symbol) {
+                collectedFromBonus++;
+              }
+            }
+          }
+          if (collectedFromBonus > 0) setMissionProgress(p => p + collectedFromBonus);
           let bonusPoints = 0;
           for (let row = 0; row < BOARD_SIZE; row++) {
             for (let col = 0; col < BOARD_SIZE; col++) {
@@ -501,6 +548,71 @@ export default function App() {
     }
   }, [levelCompleted]);
 
+  // Оновлюємо прогрес місії при кожному матчі
+  useEffect(() => {
+    if (!matches) return;
+    const mission = MISSIONS[level % MISSIONS.length];
+    let collected = 0;
+    for (let row = 0; row < BOARD_SIZE; row++) {
+      for (let col = 0; col < BOARD_SIZE; col++) {
+        if (matches[row][col] && board[row][col] === mission.symbol) {
+          collected++;
+        }
+      }
+    }
+    if (collected > 0) setMissionProgress(p => p + collected);
+  }, [matches]);
+
+  // Скидаємо прогрес місії при старті/рестарті рівня
+  useEffect(() => {
+    setMissionProgress(0);
+  }, [level, gameOver]);
+
+  // Перевірка на проходження рівня: і очки, і місія
+  useEffect(() => {
+    const mission = MISSIONS[level % MISSIONS.length];
+    if (!levelCompleted && score >= targetScore && missionProgress >= mission.count) {
+      setLevelCompleted(true);
+    }
+  }, [score, targetScore, missionProgress, levelCompleted, level]);
+
+  // Таймер підказок
+  useEffect(() => {
+    const stopHintTimer = () => {
+      if (hintTimer.current) clearTimeout(hintTimer.current);
+      setHint(null);
+    };
+
+    if (!isAnimating && !gameOver && !levelCompleted) {
+      hintTimer.current = setTimeout(() => {
+        const move = findPossibleMove(board);
+        setHint(move);
+      }, 5000); // 5 секунд
+    } else {
+      stopHintTimer();
+    }
+
+    return stopHintTimer;
+  }, [isAnimating, gameOver, levelCompleted, board]);
+
+  // Анімація підказки
+  useEffect(() => {
+    if (hint) {
+      hintAnimation.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(hintAnim, { toValue: 1.2, duration: 400, useNativeDriver: true }),
+          Animated.timing(hintAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+        ])
+      );
+      hintAnimation.current.start();
+    } else {
+      if (hintAnimation.current) {
+        hintAnimation.current.stop();
+      }
+      hintAnim.setValue(1);
+    }
+  }, [hint]);
+
   const handleCellPress = (row, col) => {
     if (isAnimating || gameOver || levelCompleted) return;
     if (!selected) {
@@ -520,6 +632,7 @@ export default function App() {
     [newBoard[selRow][selCol], newBoard[row][col]] = [newBoard[row][col], newBoard[selRow][selCol]];
     let { matches: foundMatches, bonuses: foundBonuses, matchGroups: foundGroups } = findMatches(newBoard);
     if (hasAnyMatches(foundMatches)) {
+      setHint(null); // Скидаємо підказку
       setBoard(newBoard);
       setMatches(foundMatches);
       setBonuses(foundBonuses);
@@ -545,16 +658,24 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>3 в ряд</Text>
-      <Text style={styles.level}>Рівень: {level + 1}</Text>
-      <Text style={styles.lives}>Життя: {'❤️'.repeat(lives) + '🤍'.repeat(Math.max(0, INITIAL_LIVES - lives))}</Text>
-      <Text style={styles.score}>Очки: {score} / {targetScore}</Text>
-      <Text style={styles.timer}>Час: {timer} сек</Text>
+      <Text style={styles.title}>Crypto Match</Text>
+      <Text style={styles.level}>Ринок: {level + 1}</Text>
+      <Text style={styles.lives}>Гаманці: {'👜'.repeat(lives) + '⬜️'.repeat(Math.max(0, INITIAL_LIVES - lives))}</Text>
+      <Text style={styles.score}>Баланс: {score} / {targetScore}</Text>
+      <Text style={styles.timer}>Час до закриття ринку: {timer} сек</Text>
+      {/* Місія */}
+      <Text style={styles.mission}>
+        Місія: Збери {MISSIONS[level % MISSIONS.length].count} {MISSIONS[level % MISSIONS.length].name} {MISSIONS[level % MISSIONS.length].symbol} — {missionProgress} / {MISSIONS[level % MISSIONS.length].count}
+      </Text>
       <View style={styles.board}>
         {board.map((row, rowIndex) => (
           <View key={rowIndex} style={styles.row}>
             {row.map((cell, colIndex) => {
               const isSelected = selected && selected[0] === rowIndex && selected[1] === colIndex;
+              const isHinted = hint && (
+                (hint[0][0] === rowIndex && hint[0][1] === colIndex) ||
+                (hint[1][0] === rowIndex && hint[1][1] === colIndex)
+              );
               return (
                 <TouchableOpacity
                   key={colIndex}
@@ -563,12 +684,8 @@ export default function App() {
                   onPress={() => handleCellPress(rowIndex, colIndex)}
                   disabled={isAnimating || gameOver || levelCompleted}
                 >
-                  <Animated.View style={{ opacity: opacityAnim[rowIndex][colIndex] }}>
-                    {cell === BONUS || cell === SUPER_BONUS || cell === CROSS_BONUS ? (
-                      <Text style={styles.emoji}>{cell}</Text>
-                    ) : (
-                      <Text style={styles.emoji}>{cell}</Text>
-                    )}
+                  <Animated.View style={{ opacity: opacityAnim[rowIndex][colIndex], transform: [{ scale: isHinted ? hintAnim : 1 }] }}>
+                    <Text style={styles.emoji}>{cell}</Text>
                   </Animated.View>
                 </TouchableOpacity>
               );
@@ -576,16 +693,16 @@ export default function App() {
           </View>
         ))}
       </View>
-      <Text style={styles.info}>Тапни по двом сусіднім кружечкам для обміну. 4 в ряд = 💥 бонус!</Text>
+      <Text style={styles.info}>Збирай криптомонети! 4 в ряд — 🚀 Pump, 5 в ряд — 💥 Crypto Bomb, L/T — 💣 Exchange Crash!</Text>
       {gameOver && (
         <View style={styles.overlay}>
-          <Text style={styles.gameOverText}>{levelCompleted ? 'Рівень пройдено!' : 'Гру завершено!'}</Text>
+          <Text style={styles.gameOverText}>{levelCompleted ? 'Ринок пройдено!' : 'Гру завершено!'}</Text>
           <Button title="Почати спочатку" onPress={handleRestart} />
         </View>
       )}
       {levelCompleted && !gameOver && (
         <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}> 
-          <Text style={styles.gameOverText}>Рівень пройдено! Наступний стартує...</Text>
+          <Text style={styles.gameOverText}>Ринок пройдено! Наступний стартує...</Text>
         </Animated.View>
       )}
     </SafeAreaView>
@@ -674,6 +791,13 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 24,
+    textAlign: 'center',
+  },
+  mission: {
+    color: '#ffd700',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
     textAlign: 'center',
   },
 }); 
