@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, StyleSheet, SafeAreaView, Text, TouchableOpacity, Animated, Button } from 'react-native';
 
 const BOARD_SIZE = 6;
-const EMOJIS = ['₿', 'Ξ', '��', '🐕', '◎', '₳'];
+const EMOJIS = ['₿', 'Ξ', '🪙', '🐕', '◎', '₳'];
 const BONUS = '🚀';
 const SUPER_BONUS = '💥';
 const CROSS_BONUS = '💣';
@@ -26,6 +26,8 @@ const MISSIONS = [
   { symbol: '◎', name: 'Solana', count: 14 },
   { symbol: '₳', name: 'Cardano', count: 16 },
 ];
+
+const ALL_TOKENS = ['₿', 'Ξ', '🪙', '🐕', '◎', '₳'];
 
 function getRandomEmoji() {
   return EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
@@ -307,6 +309,11 @@ function findPossibleMove(board) {
   return null; // No possible moves
 }
 
+function getRandomPrice() {
+  // Віртуальна ціна для кожної монети (рандомно)
+  return (Math.random() * 10000 + 10).toFixed(2);
+}
+
 export default function App() {
   const [board, setBoard] = useState(generateBoard());
   const [selected, setSelected] = useState(null); // [row, col]
@@ -331,6 +338,17 @@ export default function App() {
   const hintAnim = useRef(new Animated.Value(1)).current;
   const hintTimer = useRef(null);
   const hintAnimation = useRef(null);
+  const [wallet, setWallet] = useState(() => {
+    const obj = {};
+    ALL_TOKENS.forEach(t => obj[t] = 0);
+    return obj;
+  });
+  const [showWallet, setShowWallet] = useState(false);
+  const [tokenPrices, setTokenPrices] = useState(() => {
+    const obj = {};
+    ALL_TOKENS.forEach(t => obj[t] = getRandomPrice());
+    return obj;
+  });
 
   // Таймер
   useEffect(() => {
@@ -524,30 +542,6 @@ export default function App() {
     }
   }, [levelCompleted, gameOver]);
 
-  // Перехід на наступний рівень з додатковим часом
-  useEffect(() => {
-    if (levelCompleted) {
-      setTimeout(() => {
-        const nextLevel = level + 1;
-        if (nextLevel < LEVELS.length) {
-          setLevel(nextLevel);
-          setTimer(LEVELS[nextLevel].time + 5 * nextLevel);
-          setTargetScore(LEVELS[nextLevel].target);
-          setScore(0);
-          setBoard(generateBoard());
-          setSelected(null);
-          setMatches(null);
-          setBonuses([]);
-          setGameOver(false);
-          setLevelCompleted(false);
-          setLives(INITIAL_LIVES); // Відновлюємо життя
-        } else {
-          setGameOver(true);
-        }
-      }, 2000);
-    }
-  }, [levelCompleted]);
-
   // Оновлюємо прогрес місії при кожному матчі
   useEffect(() => {
     if (!matches) return;
@@ -613,6 +607,47 @@ export default function App() {
     }
   }, [hint]);
 
+  // Після проходження рівня — додаємо монети у гаманець і показуємо гаманець
+  useEffect(() => {
+    if (levelCompleted && !showWallet) {
+      const mission = MISSIONS[level % MISSIONS.length];
+      setWallet(w => ({ ...w, [mission.symbol]: w[mission.symbol] + mission.count }));
+      setTokenPrices(prices => {
+        const obj = {};
+        ALL_TOKENS.forEach(t => obj[t] = getRandomPrice());
+        return obj;
+      });
+      setTimeout(() => setShowWallet(true), 800);
+    }
+  }, [levelCompleted]);
+
+  // При переході на наступний рівень ховаємо гаманець
+  useEffect(() => {
+    setShowWallet(false);
+  }, [level]);
+
+  // Додаю кнопку "Далі" для переходу до наступного рівня
+  const handleNextLevel = () => {
+    setShowWallet(false);
+    setLevelCompleted(false);
+    const nextLevel = level + 1;
+    if (nextLevel < LEVELS.length) {
+      setLevel(nextLevel);
+      setTimer(LEVELS[nextLevel].time + 5 * nextLevel);
+      setTargetScore(LEVELS[nextLevel].target);
+      setScore(0);
+      setBoard(generateBoard());
+      setSelected(null);
+      setMatches(null);
+      setBonuses([]);
+      setGameOver(false);
+      setLives(INITIAL_LIVES);
+      setMissionProgress(0);
+    } else {
+      setGameOver(true);
+    }
+  };
+
   const handleCellPress = (row, col) => {
     if (isAnimating || gameOver || levelCompleted) return;
     if (!selected) {
@@ -655,6 +690,24 @@ export default function App() {
     setLevelCompleted(false);
     setLives(INITIAL_LIVES);
   };
+
+  // Відображення гаманця
+  const renderWallet = () => (
+    <View style={styles.walletOverlay}>
+      <Text style={styles.walletTitle}>Твій крипто-гаманець</Text>
+      {ALL_TOKENS.map(token => (
+        <View key={token} style={styles.walletRow}>
+          <Text style={styles.walletToken}>{token}</Text>
+          <Text style={styles.walletAmount}>{wallet[token]} шт.</Text>
+          <Text style={styles.walletPrice}>${tokenPrices[token]}</Text>
+        </View>
+      ))}
+      <Text style={styles.walletTotal}>
+        Вартість портфеля: ${ALL_TOKENS.reduce((sum, t) => sum + wallet[t] * tokenPrices[t], 0).toFixed(2)}
+      </Text>
+      <Button title={level + 1 < LEVELS.length ? "Наступний рівень" : "Завершити"} onPress={handleNextLevel} />
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -700,7 +753,8 @@ export default function App() {
           <Button title="Почати спочатку" onPress={handleRestart} />
         </View>
       )}
-      {levelCompleted && !gameOver && (
+      {showWallet && renderWallet()}
+      {levelCompleted && !gameOver && !showWallet && (
         <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}> 
           <Text style={styles.gameOverText}>Ринок пройдено! Наступний стартує...</Text>
         </Animated.View>
@@ -799,5 +853,50 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 8,
     textAlign: 'center',
+  },
+  walletOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(20,20,30,0.98)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  walletTitle: {
+    color: '#ffd700',
+    fontSize: 26,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  walletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  walletToken: {
+    fontSize: 28,
+    width: 40,
+    textAlign: 'center',
+  },
+  walletAmount: {
+    color: '#fff',
+    fontSize: 20,
+    width: 80,
+    textAlign: 'center',
+  },
+  walletPrice: {
+    color: '#0f0',
+    fontSize: 18,
+    width: 100,
+    textAlign: 'center',
+  },
+  walletTotal: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginVertical: 16,
   },
 }); 
