@@ -349,6 +349,8 @@ export default function App() {
     ALL_TOKENS.forEach(t => obj[t] = getRandomPrice());
     return obj;
   });
+  const [screen, setScreen] = useState('main'); // main, gameMode, game, wallet, upgrades
+  const [gameMode, setGameMode] = useState('campaign'); // campaign, classic, challenge
 
   // Таймер
   useEffect(() => {
@@ -631,21 +633,29 @@ export default function App() {
     setShowWallet(false);
     setLevelCompleted(false);
     const nextLevel = level + 1;
-    if (nextLevel < LEVELS.length) {
-      setLevel(nextLevel);
-      setTimer(LEVELS[nextLevel].time + 5 * nextLevel);
-      setTargetScore(LEVELS[nextLevel].target);
-      setScore(0);
-      setBoard(generateBoard());
-      setSelected(null);
-      setMatches(null);
-      setBonuses([]);
-      setGameOver(false);
-      setLives(INITIAL_LIVES);
-      setMissionProgress(0);
-    } else {
-      setGameOver(true);
+    if (gameMode === 'classic') {
+      // Класичний режим: ціль зростає
+      setTargetScore(t => t + 200);
+    } else if (gameMode === 'campaign') {
+      if (nextLevel < LEVELS.length) {
+        setTargetScore(LEVELS[nextLevel].target);
+      } else {
+        setGameOver(true);
+        setScreen('main');
+        return;
+      }
     }
+    setLevel(nextLevel);
+    setTimer(LEVELS[nextLevel].time + 5 * nextLevel);
+    setScore(0);
+    setBoard(generateBoard());
+    setSelected(null);
+    setMatches(null);
+    setBonuses([]);
+    setGameOver(false);
+    setLives(INITIAL_LIVES);
+    setMissionProgress(0);
+    setScreen('game');
   };
 
   const handleCellPress = (row, col) => {
@@ -689,6 +699,18 @@ export default function App() {
     setGameOver(false);
     setLevelCompleted(false);
     setLives(INITIAL_LIVES);
+    setMissionProgress(0);
+    if (gameMode === 'classic') {
+      setTargetScore(1000); // Початкова ціль для класики
+      setLives(99); // "Нескінченні" життя
+    } else if (gameMode === 'campaign') {
+      setTargetScore(LEVELS[0].target);
+      setLives(INITIAL_LIVES);
+    } else if (gameMode === 'challenge') {
+      setTargetScore(99999); // Велика ціль
+      setTimer(60); // 60 секунд на челендж
+    }
+    setScreen('game');
   };
 
   // Відображення гаманця
@@ -705,59 +727,128 @@ export default function App() {
       <Text style={styles.walletTotal}>
         Вартість портфеля: ${ALL_TOKENS.reduce((sum, t) => sum + wallet[t] * tokenPrices[t], 0).toFixed(2)}
       </Text>
-      <Button title={level + 1 < LEVELS.length ? "Наступний рівень" : "Завершити"} onPress={handleNextLevel} />
+      <Button title="Назад" onPress={() => setScreen('main')} />
+    </View>
+  );
+
+  // Екран вибору режиму
+  const renderGameModeScreen = () => (
+    <View style={styles.menuContainer}>
+      <Text style={styles.menuTitle}>Обери режим</Text>
+      <TouchableOpacity style={styles.menuButton} onPress={() => { setGameMode('campaign'); handleRestart(); }}>
+        <Text style={styles.menuButtonText}>Кампанія</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.menuButton} onPress={() => { setGameMode('classic'); handleRestart(); }}>
+        <Text style={styles.menuButtonText}>Класичний</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.menuButton} onPress={() => { setGameMode('challenge'); handleRestart(); }}>
+        <Text style={styles.menuButtonText}>Челендж</Text>
+      </TouchableOpacity>
+      <Button title="Назад" onPress={() => setScreen('main')} />
+    </View>
+  );
+
+  // Головне меню
+  const renderMainMenu = () => (
+    <View style={styles.menuContainer}>
+      <Text style={styles.menuTitle}>Crypto Match</Text>
+      <TouchableOpacity style={styles.menuButton} onPress={() => setScreen('gameMode')}>
+        <Text style={styles.menuButtonText}>Грати</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.menuButton} onPress={() => setScreen('wallet')}>
+        <Text style={styles.menuButtonText}>Гаманець</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.menuButton} onPress={() => setScreen('upgrades')}>
+        <Text style={styles.menuButtonText}>Покращення</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Екран гаманця (можна відкривати з меню)
+  const renderWalletScreen = () => (
+    <View style={styles.walletOverlay}>
+      <Text style={styles.walletTitle}>Твій крипто-гаманець</Text>
+      {ALL_TOKENS.map(token => (
+        <View key={token} style={styles.walletRow}>
+          <Text style={styles.walletToken}>{token}</Text>
+          <Text style={styles.walletAmount}>{wallet[token]} шт.</Text>
+          <Text style={styles.walletPrice}>${tokenPrices[token]}</Text>
+        </View>
+      ))}
+      <Text style={styles.walletTotal}>
+        Вартість портфеля: ${ALL_TOKENS.reduce((sum, t) => sum + wallet[t] * tokenPrices[t], 0).toFixed(2)}
+      </Text>
+      <Button title="Назад" onPress={() => setScreen('main')} />
+    </View>
+  );
+
+  // Екран покращень (заглушка)
+  const renderUpgradesScreen = () => (
+    <View style={styles.walletOverlay}>
+      <Text style={styles.walletTitle}>Покращення (скоро)</Text>
+      <Button title="Назад" onPress={() => setScreen('main')} />
     </View>
   );
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Crypto Match</Text>
-      <Text style={styles.level}>Ринок: {level + 1}</Text>
-      <Text style={styles.lives}>Гаманці: {'👜'.repeat(lives) + '⬜️'.repeat(Math.max(0, INITIAL_LIVES - lives))}</Text>
-      <Text style={styles.score}>Баланс: {score} / {targetScore}</Text>
-      <Text style={styles.timer}>Час до закриття ринку: {timer} сек</Text>
-      {/* Місія */}
-      <Text style={styles.mission}>
-        Місія: Збери {MISSIONS[level % MISSIONS.length].count} {MISSIONS[level % MISSIONS.length].name} {MISSIONS[level % MISSIONS.length].symbol} — {missionProgress} / {MISSIONS[level % MISSIONS.length].count}
-      </Text>
-      <View style={styles.board}>
-        {board.map((row, rowIndex) => (
-          <View key={rowIndex} style={styles.row}>
-            {row.map((cell, colIndex) => {
-              const isSelected = selected && selected[0] === rowIndex && selected[1] === colIndex;
-              const isHinted = hint && (
-                (hint[0][0] === rowIndex && hint[0][1] === colIndex) ||
-                (hint[1][0] === rowIndex && hint[1][1] === colIndex)
-              );
-              return (
-                <TouchableOpacity
-                  key={colIndex}
-                  style={[styles.cell, isSelected && styles.selectedCell]}
-                  activeOpacity={0.7}
-                  onPress={() => handleCellPress(rowIndex, colIndex)}
-                  disabled={isAnimating || gameOver || levelCompleted}
-                >
-                  <Animated.View style={{ opacity: opacityAnim[rowIndex][colIndex], transform: [{ scale: isHinted ? hintAnim : 1 }] }}>
-                    <Text style={styles.emoji}>{cell}</Text>
-                  </Animated.View>
-                </TouchableOpacity>
-              );
-            })}
+      {screen === 'main' && renderMainMenu()}
+      {screen === 'gameMode' && renderGameModeScreen()}
+      {screen === 'wallet' && renderWalletScreen()}
+      {screen === 'upgrades' && renderUpgradesScreen()}
+      {screen === 'game' && (
+        <>
+          <Text style={styles.title}>Crypto Match</Text>
+          <Text style={styles.level}>Ринок: {level + 1}</Text>
+          <Text style={styles.lives}>Гаманці: {'👜'.repeat(lives) + '⬜️'.repeat(Math.max(0, INITIAL_LIVES - lives))}</Text>
+          <Text style={styles.score}>Баланс: {score} / {targetScore}</Text>
+          <Text style={styles.timer}>Час до закриття ринку: {timer} сек</Text>
+          {/* Місія */}
+          {gameMode === 'campaign' && (
+            <Text style={styles.mission}>
+              Місія: Збери {MISSIONS[level % MISSIONS.length].count} {MISSIONS[level % MISSIONS.length].name} {MISSIONS[level % MISSIONS.length].symbol} — {missionProgress} / {MISSIONS[level % MISSIONS.length].count}
+            </Text>
+          )}
+          <View style={styles.board}>
+            {board.map((row, rowIndex) => (
+              <View key={rowIndex} style={styles.row}>
+                {row.map((cell, colIndex) => {
+                  const isSelected = selected && selected[0] === rowIndex && selected[1] === colIndex;
+                  const isHinted = hint && (
+                    (hint[0][0] === rowIndex && hint[0][1] === colIndex) ||
+                    (hint[1][0] === rowIndex && hint[1][1] === colIndex)
+                  );
+                  return (
+                    <TouchableOpacity
+                      key={colIndex}
+                      style={[styles.cell, isSelected && styles.selectedCell]}
+                      activeOpacity={0.7}
+                      onPress={() => handleCellPress(rowIndex, colIndex)}
+                      disabled={isAnimating || gameOver || levelCompleted}
+                    >
+                      <Animated.View style={{ opacity: opacityAnim[rowIndex][colIndex], transform: [{ scale: isHinted ? hintAnim : 1 }] }}>
+                        <Text style={styles.emoji}>{cell}</Text>
+                      </Animated.View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
           </View>
-        ))}
-      </View>
-      <Text style={styles.info}>Збирай криптомонети! 4 в ряд — 🚀 Pump, 5 в ряд — 💥 Crypto Bomb, L/T — 💣 Exchange Crash!</Text>
-      {gameOver && (
-        <View style={styles.overlay}>
-          <Text style={styles.gameOverText}>{levelCompleted ? 'Ринок пройдено!' : 'Гру завершено!'}</Text>
-          <Button title="Почати спочатку" onPress={handleRestart} />
-        </View>
-      )}
-      {showWallet && renderWallet()}
-      {levelCompleted && !gameOver && !showWallet && (
-        <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}> 
-          <Text style={styles.gameOverText}>Ринок пройдено! Наступний стартує...</Text>
-        </Animated.View>
+          <Text style={styles.info}>Збирай криптомонети! 4 в ряд — 🚀 Pump, 5 в ряд — 💥 Crypto Bomb, L/T — 💣 Exchange Crash!</Text>
+          {gameOver && (
+            <View style={styles.overlay}>
+              <Text style={styles.gameOverText}>{levelCompleted ? 'Ринок пройдено!' : 'Гру завершено!'}</Text>
+              <Button title="Почати спочатку" onPress={handleRestart} />
+            </View>
+          )}
+          {showWallet && renderWallet()}
+          {levelCompleted && !gameOver && !showWallet && (
+            <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}> 
+              <Text style={styles.gameOverText}>Ринок пройдено! Наступний стартує...</Text>
+            </Animated.View>
+          )}
+        </>
       )}
     </SafeAreaView>
   );
@@ -898,5 +989,32 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     marginVertical: 16,
+  },
+  menuContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#222',
+  },
+  menuTitle: {
+    color: '#ffd700',
+    fontSize: 36,
+    fontWeight: 'bold',
+    marginBottom: 48,
+  },
+  menuButton: {
+    backgroundColor: '#333',
+    paddingVertical: 18,
+    paddingHorizontal: 48,
+    borderRadius: 16,
+    marginBottom: 24,
+    width: 220,
+    alignItems: 'center',
+  },
+  menuButtonText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+    letterSpacing: 1,
   },
 }); 
