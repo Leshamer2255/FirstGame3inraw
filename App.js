@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, StyleSheet, SafeAreaView, Text, TouchableOpacity, Animated, Button } from 'react-native';
+import { Svg, Polyline } from 'react-native-svg';
 
 const BOARD_SIZE = 6;
 const EMOJIS = ['₿', 'Ξ', '🪙', '🐕', '◎', '₳'];
@@ -119,9 +120,44 @@ const GAME_MODES = {
   },
 };
 
+// Додаю об'єкт фіксованих цін для монет
+const FIXED_PRICES = {
+  '₿': 65000,
+  'Ξ': 3500,
+  '🪙': 1,
+  '🐕': 0.12,
+  '◎': 150,
+  '₳': 0.4,
+  '⚡': 10,
+  '🌙': 0.05,
+  '🔥': 2,
+  '💎': 2000,
+  '🚀': 1800,
+  '🎯': 1600,
+  '⭐': 1400,
+  '🌟': 1300,
+  '💫': 1700,
+  '🌍': 1100,
+  '🌊': 900,
+  '🌪️': 1900,
+  '🌈': 2200,
+  '🎪': 2500
+};
+
+// Додаю хук для історії цін
+function getInitialHistory() {
+  const obj = {};
+  ALL_TOKENS.forEach(t => obj[t] = Array(12).fill(FIXED_PRICES[t]));
+  return obj;
+}
+
 export default function App() {
   const [availableTokens, setAvailableTokens] = useState(INITIAL_AVAILABLE_TOKENS); // Доступні монети для гри
   const [showShop, setShowShop] = useState(false);
+  const [priceHistory, setPriceHistory] = useState(getInitialHistory);
+
+  // Додаю утиліту для отримання поточної ціни монети з графіка (тепер всередині App)
+  const getCurrentPrice = (token) => priceHistory[token][priceHistory[token].length - 1];
 
   // Функція для отримання випадкової монети (тепер всередині компонента)
   const getRandomEmoji = () => {
@@ -165,17 +201,9 @@ export default function App() {
   const hintAnim = useRef(new Animated.Value(1)).current;
   const hintTimer = useRef(null);
   const hintAnimation = useRef(null);
-  const [wallet, setWallet] = useState(() => {
-    const obj = {};
-    ALL_TOKENS.forEach(t => obj[t] = 0);
-    return obj;
-  });
+  const [wallet, setWallet] = useState(getInitialWallet);
   const [showWallet, setShowWallet] = useState(false);
-  const [tokenPrices, setTokenPrices] = useState(() => {
-    const obj = {};
-    ALL_TOKENS.forEach(t => obj[t] = getRandomPrice());
-    return obj;
-  });
+  const [tokenPrices, setTokenPrices] = useState(getInitialTokenPrices);
   const [screen, setScreen] = useState('main'); // main, gameMode, game, wallet, upgrades, shop
   const [gameMode, setGameMode] = useState('campaign'); // campaign, classic, challenge, speedrun, puzzle
   const [movesLeft, setMovesLeft] = useState(20); // Для режиму пазл
@@ -453,10 +481,40 @@ export default function App() {
     return null; // No possible moves
   }
 
-  function getRandomPrice() {
-    // Віртуальна ціна для кожної монети (рандомно)
-    return (Math.random() * 10000 + 10).toFixed(2);
+  // Додаю функцію для початкового гаманця з prevPrice
+  function getInitialWallet() {
+    const obj = {};
+    ALL_TOKENS.forEach(t => obj[t] = { amount: 0 });
+    return obj;
   }
+
+  // Оновлюю getInitialTokenPrices для фіксованих цін
+  function getInitialTokenPrices() {
+    const obj = {};
+    ALL_TOKENS.forEach(t => obj[t] = { price: FIXED_PRICES[t], prevPrice: null });
+    return obj;
+  }
+
+  // Ефект для імітації ринку (кожні 10 секунд)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPriceHistory(prev => {
+        const newHistory = { ...prev };
+        ALL_TOKENS.forEach(token => {
+          // Випадково: 60% шанс залишити, 20% ріст, 20% падіння
+          const last = prev[token][prev[token].length - 1];
+          let next = last;
+          const rand = Math.random();
+          if (rand < 0.2) next = +(last * (1 + Math.random() * 0.03)).toFixed(2); // ріст до 3%
+          else if (rand < 0.4) next = +(last * (1 - Math.random() * 0.03)).toFixed(2); // падіння до 3%
+          // 60% — залишаємо як є
+          newHistory[token] = [...prev[token].slice(1), next];
+        });
+        return newHistory;
+      });
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Таймер
   useEffect(() => {
@@ -765,7 +823,13 @@ export default function App() {
       // Додаємо монети з місії
       if (GAME_MODES[gameMode].hasMissions) {
         earned[mission.symbol] = mission.count;
-        setWallet(w => ({ ...w, [mission.symbol]: w[mission.symbol] + mission.count }));
+        setWallet(w => ({
+          ...w,
+          [mission.symbol]: {
+            ...w[mission.symbol],
+            amount: w[mission.symbol].amount + mission.count
+          }
+        }));
       }
       
       // Додаємо монети з гри (за матчі)
@@ -773,16 +837,17 @@ export default function App() {
       if (totalEarned > 0) {
         const randomToken = availableTokens[Math.floor(Math.random() * availableTokens.length)];
         earned[randomToken] = (earned[randomToken] || 0) + totalEarned;
-        setWallet(w => ({ ...w, [randomToken]: w[randomToken] + totalEarned }));
+        setWallet(w => ({
+          ...w,
+          [randomToken]: {
+            ...w[randomToken],
+            amount: w[randomToken].amount + totalEarned
+          }
+        }));
       }
       
       setEarnedCoins(earned);
       
-      setTokenPrices(prices => {
-        const obj = {};
-        ALL_TOKENS.forEach(t => obj[t] = getRandomPrice());
-        return obj;
-      });
       setTimeout(() => setShowWallet(true), 800);
     }
   }, [levelCompleted]);
@@ -922,87 +987,82 @@ export default function App() {
     setScreen('game');
   };
 
-  // Функція покупки монети
+  // Оновлюю buyCoin для динамічної ціни
   const buyCoin = (coinSymbol) => {
     const coin = COIN_SHOP.find(c => c.symbol === coinSymbol);
     if (!coin || coin.owned) return;
-    
-    const totalMoney = ALL_TOKENS.reduce((sum, t) => sum + wallet[t] * tokenPrices[t], 0);
+    const totalMoney = ALL_TOKENS.reduce((sum, t) => sum + wallet[t].amount * getCurrentPrice(t), 0);
     if (totalMoney >= coin.price) {
-      // Розраховуємо скільки монет потрібно продати для покупки
       let remainingCost = coin.price;
       const newWallet = { ...wallet };
-      
-      // Продаємо монети по черзі, починаючи з найменш цінних
-      const sortedTokens = ALL_TOKENS.sort((a, b) => tokenPrices[a] - tokenPrices[b]);
-      
+      const sortedTokens = ALL_TOKENS.sort((a, b) => getCurrentPrice(a) - getCurrentPrice(b));
       for (const token of sortedTokens) {
         if (remainingCost <= 0) break;
-        const tokenValue = newWallet[token] * tokenPrices[token];
+        const tokenValue = newWallet[token].amount * getCurrentPrice(token);
         if (tokenValue > 0) {
           if (tokenValue >= remainingCost) {
-            const tokensToSell = Math.ceil(remainingCost / tokenPrices[token]);
-            newWallet[token] = Math.max(0, newWallet[token] - tokensToSell);
+            const tokensToSell = Math.ceil(remainingCost / getCurrentPrice(token));
+            newWallet[token] = {
+              ...newWallet[token],
+              amount: Math.max(0, newWallet[token].amount - tokensToSell)
+            };
             remainingCost = 0;
           } else {
             remainingCost -= tokenValue;
-            newWallet[token] = 0;
+            newWallet[token] = {
+              ...newWallet[token],
+              amount: 0
+            };
           }
         }
       }
-      
       if (remainingCost <= 0) {
         setWallet(newWallet);
         setAvailableTokens(prev => [...prev, coinSymbol]);
-        // Оновлюємо ціни після покупки
-        setTokenPrices(prices => {
-          const obj = {};
-          ALL_TOKENS.forEach(t => obj[t] = getRandomPrice());
-          return obj;
-        });
-        // Оновлюємо дошку з новою монетою
         setBoard(generateBoard());
       }
     }
   };
 
-  // Відображення гаманця після рівня
-  const renderWallet = () => (
-    <View style={styles.walletOverlay}>
-      <Text style={styles.walletTitle}>Нагороди за рівень!</Text>
-      
-      {Object.keys(earnedCoins).length > 0 ? (
-        <>
-          <View style={styles.earnedCoinsContainer}>
-            {Object.entries(earnedCoins).map(([token, amount]) => (
-              <View key={token} style={styles.earnedCoinItem}>
-                <Text style={styles.earnedCoinSymbol}>{token}</Text>
-                <Text style={styles.earnedCoinAmount}>+{amount}</Text>
-                <Text style={styles.earnedCoinValue}>
-                  ${(amount * tokenPrices[token]).toFixed(2)}
-                </Text>
-              </View>
-            ))}
+  // Компонент спарклайн-графіка
+  const Sparkline = ({ data, color }) => {
+    const width = 60;
+    const height = 24;
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const points = data.map((v, i) => {
+      const x = (i / (data.length - 1)) * width;
+      const y = height - ((v - min) / (max - min || 1)) * height;
+      return `${x},${y}`;
+    }).join(' ');
+    return (
+      <Svg width={width} height={height}>
+        <Polyline
+          points={points}
+          fill="none"
+          stroke={color || '#ffd700'}
+          strokeWidth="2"
+        />
+      </Svg>
+    );
+  };
+
+  // Оновлюю renderWalletScreen для динамічної ціни
+  const renderWalletScreen = () => (
+    <View style={[styles.walletOverlay, {paddingHorizontal: 12}]}> 
+      <Text style={styles.walletTitle}>Твій крипто-гаманець</Text>
+      <View style={{width: '100%', maxWidth: 400, backgroundColor: '#292929', borderRadius: 18, padding: 12, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, elevation: 4}}>
+        {ALL_TOKENS.map(token => (
+          <View key={token} style={[styles.walletRow, {backgroundColor: '#232323', borderRadius: 10, marginBottom: 8, alignItems: 'center', paddingVertical: 6, paddingHorizontal: 4, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 2, elevation: 1}]}> 
+            <Text style={[styles.walletToken, {fontSize: 32, marginRight: 8}]}>{token}</Text>
+            <Text style={[styles.walletAmount, {fontWeight: 'bold', color: '#ffd700', width: 70}]}>{wallet[token].amount} шт.</Text>
+            <Text style={[styles.walletPrice, {fontWeight: 'bold', color: '#0f0', width: 80}]}>${getCurrentPrice(token)}</Text>
+            <Sparkline data={priceHistory[token]} color={priceHistory[token][11] >= priceHistory[token][0] ? '#0f0' : '#f44'} />
           </View>
-          
-          <Text style={styles.earnedTotal}>
-            Загальна вартість: ${Object.entries(earnedCoins)
-              .reduce((sum, [token, amount]) => sum + amount * tokenPrices[token], 0)
-              .toFixed(2)}
-          </Text>
-        </>
-      ) : (
-        <Text style={styles.noEarnings}>Немає зароблених монет</Text>
-      )}
-      
-      <View style={styles.walletButtons}>
-        <TouchableOpacity style={styles.nextLevelButton} onPress={handleNextLevel}>
-          <Text style={styles.nextLevelButtonText}>Наступний рівень</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.mainMenuButton} onPress={returnToMainMenu}>
-          <Text style={styles.mainMenuButtonText}>Головне меню</Text>
-        </TouchableOpacity>
+        ))}
       </View>
+      <Text style={[styles.walletTotal, {marginTop: 18, fontSize: 22, color: '#ffd700', textShadowColor: '#000', textShadowOffset: {width: 1, height: 1}, textShadowRadius: 2}]}>Вартість портфеля: ${ALL_TOKENS.reduce((sum, t) => sum + wallet[t].amount * getCurrentPrice(t), 0).toFixed(2)}</Text>
+      <Button title="Назад" onPress={() => setScreen('main')} />
     </View>
   );
 
@@ -1046,27 +1106,9 @@ export default function App() {
     </View>
   );
 
-  // Екран гаманця (можна відкривати з меню)
-  const renderWalletScreen = () => (
-    <View style={styles.walletOverlay}>
-      <Text style={styles.walletTitle}>Твій крипто-гаманець</Text>
-      {ALL_TOKENS.map(token => (
-        <View key={token} style={styles.walletRow}>
-          <Text style={styles.walletToken}>{token}</Text>
-          <Text style={styles.walletAmount}>{wallet[token]} шт.</Text>
-          <Text style={styles.walletPrice}>${tokenPrices[token]}</Text>
-        </View>
-      ))}
-      <Text style={styles.walletTotal}>
-        Вартість портфеля: ${ALL_TOKENS.reduce((sum, t) => sum + wallet[t] * tokenPrices[t], 0).toFixed(2)}
-      </Text>
-      <Button title="Назад" onPress={() => setScreen('main')} />
-    </View>
-  );
-
   // Екран магазину монет
   const renderShopScreen = () => {
-    const totalMoney = ALL_TOKENS.reduce((sum, t) => sum + wallet[t] * tokenPrices[t], 0);
+    const totalMoney = ALL_TOKENS.reduce((sum, t) => sum + wallet[t].amount * getCurrentPrice(t), 0);
     
     return (
       <View style={styles.shopOverlay}>
