@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, StyleSheet, SafeAreaView, Text, TouchableOpacity, Animated, Button } from 'react-native';
 import { Svg, Polyline } from 'react-native-svg';
+import { Audio } from 'expo-av';
 
 const BOARD_SIZE = 6;
 const EMOJIS = ['₿', 'Ξ', '🪙', '🐕', '◎', '₳'];
@@ -210,6 +211,38 @@ export default function App() {
   const [timeBonus, setTimeBonus] = useState(0); // Для режиму спідран
   const [earnedCoins, setEarnedCoins] = useState({}); // Монети, зароблені за рівень
   const [noMovesAvailable, setNoMovesAvailable] = useState(false); // Немає можливих ходів
+
+  // Додаю fade-in анімацію для екранів
+  const screenFadeAnim = useRef(new Animated.Value(1)).current;
+
+  // Звук для матчів
+  const matchSound = useRef();
+
+  useEffect(() => {
+    screenFadeAnim.setValue(0);
+    Animated.timing(screenFadeAnim, {
+      toValue: 1,
+      duration: 350,
+      useNativeDriver: true,
+    }).start();
+  }, [screen]);
+
+  useEffect(() => {
+    // Завантажуємо звук при монтуванні
+    (async () => {
+      matchSound.current = new Audio.Sound();
+      try {
+        await matchSound.current.loadAsync(require('./assets/match.mp3'));
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => {
+      if (matchSound.current) {
+        matchSound.current.unloadAsync();
+      }
+    };
+  }, []);
 
   function cloneBoard(board) {
     return board.map(row => [...row]);
@@ -611,6 +644,12 @@ export default function App() {
   // Анімація зникнення
   useEffect(() => {
     if (!matches) return;
+    // Програємо звук матчу
+    if (matchSound.current) {
+      try {
+        matchSound.current.replayAsync();
+      } catch (e) {}
+    }
     setIsAnimating(true);
     const animations = [];
     for (let row = 0; row < BOARD_SIZE; row++) {
@@ -1220,109 +1259,111 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {screen === 'main' && renderMainMenu()}
-      {screen === 'gameMode' && renderGameModeScreen()}
-      {screen === 'wallet' && renderWalletScreen()}
-      {screen === 'shop' && renderShopScreen()}
-      {screen === 'upgrades' && renderUpgradesScreen()}
-      {screen === 'game' && (
-        <>
-          <Text style={styles.title}>Crypto Match</Text>
-          <Text style={styles.level}>
-            {GAME_MODES[gameMode].hasLevels ? `Ринок: ${level + 1}` : GAME_MODES[gameMode].name}
-          </Text>
-          <Text style={styles.lives}>
-            Гаманці: {'👜'.repeat(lives) + '⬜️'.repeat(Math.max(0, 10 - lives))}
-          </Text>
-          <Text style={styles.score}>Баланс: {score} / {targetScore}</Text>
-          
-          {/* Показуємо таймер тільки для режимів з часом */}
-          {GAME_MODES[gameMode].hasTimer && (
-            <Text style={styles.timer}>
-              Час: {timer} сек {timeBonus > 0 && `(+${timeBonus})`}
+      <Animated.View style={{ flex: 1, width: '100%', opacity: screenFadeAnim }}>
+        {screen === 'main' && renderMainMenu()}
+        {screen === 'gameMode' && renderGameModeScreen()}
+        {screen === 'wallet' && renderWalletScreen()}
+        {screen === 'shop' && renderShopScreen()}
+        {screen === 'upgrades' && renderUpgradesScreen()}
+        {screen === 'game' && (
+          <>
+            <Text style={styles.title}>Crypto Match</Text>
+            <Text style={styles.level}>
+              {GAME_MODES[gameMode].hasLevels ? `Ринок: ${level + 1}` : GAME_MODES[gameMode].name}
             </Text>
-          )}
-          
-          {/* Показуємо ходи для режиму пазл */}
-          {GAME_MODES[gameMode].moveLimit && (
-            <Text style={styles.moves}>Ходи: {movesLeft}</Text>
-          )}
-          
-          {/* Місія тільки для кампанії */}
-          {GAME_MODES[gameMode].hasMissions && (
-            <Text style={styles.mission}>
-              Місія: Збери {MISSIONS[level % MISSIONS.length].count} {MISSIONS[level % MISSIONS.length].name} {MISSIONS[level % MISSIONS.length].symbol} — {missionProgress} / {MISSIONS[level % MISSIONS.length].count}
+            <Text style={styles.lives}>
+              Гаманці: {'👜'.repeat(lives) + '⬜️'.repeat(Math.max(0, 10 - lives))}
             </Text>
-          )}
-          
-          <View style={styles.board}>
-            {board.map((row, rowIndex) => (
-              <View key={rowIndex} style={styles.row}>
-                {row.map((cell, colIndex) => {
-                  const isSelected = selected && selected[0] === rowIndex && selected[1] === colIndex;
-                  const isHinted = hint && (
-                    (hint[0][0] === rowIndex && hint[0][1] === colIndex) ||
-                    (hint[1][0] === rowIndex && hint[1][1] === colIndex)
-                  );
-                  return (
-                    <TouchableOpacity
-                      key={colIndex}
-                      style={[styles.cell, isSelected && styles.selectedCell]}
-                      activeOpacity={0.7}
-                      onPress={() => handleCellPress(rowIndex, colIndex)}
-                      disabled={isAnimating || gameOver || levelCompleted || (GAME_MODES[gameMode].moveLimit && movesLeft <= 0)}
-                    >
-                      <Animated.View style={{ opacity: opacityAnim[rowIndex][colIndex], transform: [{ scale: isHinted ? hintAnim : 1 }] }}>
-                        <Text style={styles.emoji}>{cell}</Text>
-                      </Animated.View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            ))}
-          </View>
-          
-          <Text style={styles.info}>
-            {GAME_MODES[gameMode].timeBonus ? 
-              'Швидкі матчі дають бонус часу!' :
-              'Збирай криптомонети! 4 в ряд — 🚀 Pump, 5 в ряд — 💥 Crypto Bomb, L/T — 💣 Exchange Crash!'
-            }
-          </Text>
-          
-          {/* Кнопка перемішування */}
-          {noMovesAvailable && !isAnimating && !gameOver && !levelCompleted && (
-            <View style={styles.shuffleContainer}>
-              <Text style={styles.noMovesText}>Немає можливих ходів!</Text>
-              <TouchableOpacity style={styles.shuffleButton} onPress={shuffleBoard}>
-                <Text style={styles.shuffleButtonText}>🔄 Перемішати</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-          
-          {gameOver && (
-            <View style={styles.overlay}>
-              <Text style={styles.gameOverText}>
-                {levelCompleted ? 'Рівень пройдено!' : 'Гру завершено!'}
+            <Text style={styles.score}>Баланс: {score} / {targetScore}</Text>
+            
+            {/* Показуємо таймер тільки для режимів з часом */}
+            {GAME_MODES[gameMode].hasTimer && (
+              <Text style={styles.timer}>
+                Час: {timer} сек {timeBonus > 0 && `(+${timeBonus})`}
               </Text>
-              <View style={styles.gameOverButtons}>
-                <TouchableOpacity style={styles.gameOverButton} onPress={handleRestart}>
-                  <Text style={styles.gameOverButtonText}>Почати спочатку</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.gameOverButton} onPress={returnToMainMenu}>
-                  <Text style={styles.gameOverButtonText}>Головне меню</Text>
+            )}
+            
+            {/* Показуємо ходи для режиму пазл */}
+            {GAME_MODES[gameMode].moveLimit && (
+              <Text style={styles.moves}>Ходи: {movesLeft}</Text>
+            )}
+            
+            {/* Місія тільки для кампанії */}
+            {GAME_MODES[gameMode].hasMissions && (
+              <Text style={styles.mission}>
+                Місія: Збери {MISSIONS[level % MISSIONS.length].count} {MISSIONS[level % MISSIONS.length].name} {MISSIONS[level % MISSIONS.length].symbol} — {missionProgress} / {MISSIONS[level % MISSIONS.length].count}
+              </Text>
+            )}
+            
+            <View style={styles.board}>
+              {board.map((row, rowIndex) => (
+                <View key={rowIndex} style={styles.row}>
+                  {row.map((cell, colIndex) => {
+                    const isSelected = selected && selected[0] === rowIndex && selected[1] === colIndex;
+                    const isHinted = hint && (
+                      (hint[0][0] === rowIndex && hint[0][1] === colIndex) ||
+                      (hint[1][0] === rowIndex && hint[1][1] === colIndex)
+                    );
+                    return (
+                      <TouchableOpacity
+                        key={colIndex}
+                        style={[styles.cell, isSelected && styles.selectedCell]}
+                        activeOpacity={0.7}
+                        onPress={() => handleCellPress(rowIndex, colIndex)}
+                        disabled={isAnimating || gameOver || levelCompleted || (GAME_MODES[gameMode].moveLimit && movesLeft <= 0)}
+                      >
+                        <Animated.View style={{ opacity: opacityAnim[rowIndex][colIndex], transform: [{ scale: isHinted ? hintAnim : 1 }] }}>
+                          <Text style={styles.emoji}>{cell}</Text>
+                        </Animated.View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+            
+            <Text style={styles.info}>
+              {GAME_MODES[gameMode].timeBonus ? 
+                'Швидкі матчі дають бонус часу!' :
+                'Збирай криптомонети! 4 в ряд — 🚀 Pump, 5 в ряд — 💥 Crypto Bomb, L/T — 💣 Exchange Crash!'
+              }
+            </Text>
+            
+            {/* Кнопка перемішування */}
+            {noMovesAvailable && !isAnimating && !gameOver && !levelCompleted && (
+              <View style={styles.shuffleContainer}>
+                <Text style={styles.noMovesText}>Немає можливих ходів!</Text>
+                <TouchableOpacity style={styles.shuffleButton} onPress={shuffleBoard}>
+                  <Text style={styles.shuffleButtonText}>🔄 Перемішати</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          )}
-          
-          {showWallet && renderWallet()}
-          {levelCompleted && !gameOver && !showWallet && (
-            <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}> 
-              <Text style={styles.gameOverText}>Рівень пройдено! Наступний стартує...</Text>
-            </Animated.View>
-          )}
-        </>
-      )}
+            )}
+            
+            {gameOver && (
+              <View style={styles.overlay}>
+                <Text style={styles.gameOverText}>
+                  {levelCompleted ? 'Рівень пройдено!' : 'Гру завершено!'}
+                </Text>
+                <View style={styles.gameOverButtons}>
+                  <TouchableOpacity style={styles.gameOverButton} onPress={handleRestart}>
+                    <Text style={styles.gameOverButtonText}>Почати спочатку</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.gameOverButton} onPress={returnToMainMenu}>
+                    <Text style={styles.gameOverButtonText}>Головне меню</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            
+            {showWallet && renderWallet()}
+            {levelCompleted && !gameOver && !showWallet && (
+              <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}> 
+                <Text style={styles.gameOverText}>Рівень пройдено! Наступний стартує...</Text>
+              </Animated.View>
+            )}
+          </>
+        )}
+      </Animated.View>
     </SafeAreaView>
   );
 }
